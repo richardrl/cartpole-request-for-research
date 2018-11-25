@@ -12,19 +12,25 @@ def running_avg(arr, N, cur_iter):
     arr = arr.unsqueeze(0)
     return torch.sum(arr.narrow(0, cur_iter - N, N))/N
 
-def policy(params, obs):
+def policy(theta, s):
     """
-    Params: (2, 4) weights
+    Theta: (2, 4) weights
 
-    Obs: (4, ) state/observation vector
+    s: (4, ) state/observation vector
 
     Output: (2, ) action logits vector
 
     """
-    return F.softmax(torch.matmul(params, torch.from_numpy(obs).float()))
+    return F.softmax(torch.matmul(theta, torch.from_numpy(s).float()))
+
+def value(w, s):
+    pass
 
 def initialize_params():
     return torch.rand((2, 4), requires_grad=True)
+
+def sample_bernoulli_distribution(dist):
+    return 1 if torch.rand(1)[0] < dist[1] else 0 
 
 def main():
     writer = SummaryWriter()
@@ -33,48 +39,81 @@ def main():
 
     env = gym.make("CartPole-v0")
 
-    max_episodes = 10000
-    episodes_rewards = torch.zeros(max_episodes)
+    max_batches = 10000
 
-    gamma = .99
+    gamma = .97
     episode_max_step = 200
 
-    episode_rewards = torch.zeros(episode_max_step)
-    episode_obs = torch.zeros(episode_max_step, 4)
-    episode_actions = torch.zeros(episode_max_step)
+    batch_size = 1
 
-    opt=torch.optim.Adam([params])
+    opt=torch.optim.Adam([params], lr=2**-13)
 
-    for ep in range(max_episodes):
-        obs = env.reset()
-        done = False
-        step_count = 0
-        while not done:
-            action = torch.argmax(policy(params, obs)).detach().numpy()
-            obs, reward, done, info = env.step(action)
-            episode_rewards[step_count] = reward
-            episode_obs[step_count] = torch.from_numpy(obs)
-            episode_actions[step_count] = torch.from_numpy(action)
-            step_count += 1
+    episode_rewards_n = torch.zeros([batch_size, episode_max_step])
+    episode_obs_n = torch.zeros([batch_size, episode_max_step, 4])
+    episode_actions_n = torch.zeros([batch_size, episode_max_step])
+
+    for batch in range(max_batches):
+        traj_idx = 0
+        while traj_idx < batch_size:       
+            step_count = 0
+            obs = env.reset()
+            done = False
+            while not done:
+                dist = policy(params, obs)
+                # print("dist " + str(dist))
+                action = sample_bernoulli_distribution(dist)
+                obs, reward, done, info = env.step(action)
+                # env.render()
+                episode_rewards_n[traj_idx][step_count] = reward
+                # import ipdb; ipdb.set_trace()
+                episode_obs_n[traj_idx][step_count] = torch.from_numpy(obs)
+                episode_actions_n[traj_idx][step_count] = action
+                step_count += 1
+            if step_count > 0:
+                traj_idx += 1
         gamma_t = 1
-        cumsum = torch.cumsum(episode_rewards, dim=0)
-        for ep_step in range(episode_rewards.nonzero().size(0)):   
-            gamma_t = gamma_t*gamma
-            loss_fnx = gamma * cumsum[ep_step] * F.log_softmax(torch.matmul(params, \
-                episode_obs[ep_step].float()))[episode_actions[ep_step].long()]
-            opt.zero_grad()
-            loss_fnx.backward()
-            opt.step()
+
+        # Build loss for policy gradient update
+        loss_fnx = 0
+
+        for traj_idx in range(batch_size):
+            episode_rewards = episode_rewards_n[traj_idx]
+            episode_obs = episode_obs_n[traj_idx]
+            episode_actions = episode_actions_n[traj_idx]
+            traj_loss = 0
+            T = episode_rewards.nonzero().size(0)
+            for ep_step in range(T):
+                gamma_t = gamma_t*gamma
+                partial_loss = F.log_softmax(torch.matmul(params, \
+                    episode_obs[ep_step].float()))[episode_actions[ep_step].long()]
+                # import ipdb; ipdb.set_trace()
+                G = torch.sum(episode_rewards.narrow(0, ep_step, episode_rewards.size(0)-ep_step))
+                traj_loss += gamma_t* G * partial_loss
+                # print("params grad " + str(params.grad))
+                # print("partial loss" + str(partial_loss))
+                # print("loss fnx " + str(loss_fnx))
+                # print("action taken " + str(episode_actions[ep_step].long()))
+                # print("\n")
+            loss_fnx += traj_loss/T
+
+        # opt.zero_grad()
+        # params.grad.data.zero_()
+        opt.zero_grad()
+        loss_fnx /= batch_size
+        loss_fnx = loss_fnx
+        loss_fnx.backward()
+        opt.step()
         # Episode complete, reset variables
 
-        episodes_rewards[ep] = torch.sum(episode_rewards)
-        # if ep % 10 == 0 and ep > 0:
-        #     print("Average reward (10 trials): " + str(running_avg(episodes_rewards, 10, ep)))
-        cum_ep_reward = torch.sum(episode_rewards)
-        writer.add_scalar("episode_reward", cum_ep_reward, ep)
-        print("episode: "+ str(ep) + " reward:" +str(cum_ep_reward))
-        episode_rewards = torch.zeros(episode_max_step) # Reset episode rewards
-    print("Max total reward: " + str(torch.max(episodes_rewards)))
+        average_ep_reward = torch.mean(torch.sum(episode_rewards_n, dim=1))
+        writer.add_scalar("average_reward_over_batch", average_ep_reward, batch)
+        print("batch: "+ str(batch) + " reward:" +str(average_ep_reward))
+        if average_ep_reward > 195:
+            break
+
+        episode_rewards_n = torch.zeros([batch_size, episode_max_step])
+        episode_obs_n = torch.zeros([batch_size, episode_max_step, 4])
+        episode_actions_n = torch.zeros([batch_size, episode_max_step])
     writer.close()
 
 if __name__ == "__main__":
