@@ -57,9 +57,10 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
 
     # Use one-hot-encoded sampled_actions to zero out the non-sampled action
     # import ipdb; ipdb.set_trace()
-    sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1)
-    gammas = torch.from_numpy(np.asarray([gamma*i for i in range(states.size(0))])).float()
-    return torch.mean(gammas * advantages * sample_policy)
+    sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1) 
+    gammas = torch.from_numpy(np.asarray([gamma**i for i in range(states.size(0))])).float()
+    # import ipdb; ipdb.set_trace()
+    return -torch.mean(gammas * advantages * sample_policy) # Positive * positive * negative
 
 def list2tensor(lst):
     return torch.from_numpy(np.asarray(lst)).float()
@@ -116,67 +117,8 @@ def main():
             break
         opt.zero_grad()
         loss.backward()
+        writer.add_scalar("gradient norm", torch.norm(theta.grad, 2), episode)
         opt.step()
-    # episode_rewards_n = torch.zeros([batch_size, episode_max_step])
-    # episode_obs_n = torch.zeros([batch_size, episode_max_step, 4])
-    # episode_actions_n = torch.zeros([batch_size, episode_max_step])
-
-    # for batch in range(max_batches):
-    #     traj_idx = 0
-    #     while traj_idx < batch_size:       
-    #         step_count = 0
-    #         obs = env.reset()
-    #         done = False
-    #         while not done:
-    #             dist = policy(params, obs)
-    #             # print("dist " + str(dist))
-    #             action = sample_bernoulli_distribution(dist)
-    #             obs, reward, done, info = env.step(action)
-    #             episode_rewards_n[traj_idx][step_count] = reward
-    #             # import ipdb; ipdb.set_trace()
-    #             episode_obs_n[traj_idx][step_count] = torch.from_numpy(obs)
-    #             episode_actions_n[traj_idx][step_count] = action
-    #             step_count += 1
-    #         if step_count > 0:
-    #             traj_idx += 1
-    #     gamma_t = 1
-
-    #     # Build loss for policy gradient update
-    #     loss_fnx = 0
-
-    #     for traj_idx in range(batch_size):
-    #         episode_rewards = episode_rewards_n[traj_idx]
-    #         episode_obs = episode_obs_n[traj_idx]
-    #         episode_actions = episode_actions_n[traj_idx]
-    #         traj_loss = 0
-    #         T = episode_rewards.nonzero().size(0)
-    #         for ep_step in range(T):
-    #             gamma_t = gamma_t*gamma
-    #             partial_loss = F.log_softmax(torch.matmul(params, \
-    #                 episode_obs[ep_step].float()))[episode_actions[ep_step].long()]
-    #             G = torch.sum(episode_rewards.narrow(0, ep_step, episode_rewards.size(0)-ep_step))
-    #             # import ipdb; ipdb.set_trace()
-    #             traj_loss += gamma_t* G * partial_loss
-    #         loss_fnx += traj_loss/T
-
-    #     # opt.zero_grad()
-    #     # params.grad.data.zero_()
-    #     opt.zero_grad()
-    #     loss_fnx /= batch_size
-    #     loss_fnx = loss_fnx
-    #     loss_fnx.backward()
-    #     opt.step()
-    #     # Episode complete, reset variables
-
-    #     average_ep_reward = torch.mean(torch.sum(episode_rewards_n, dim=1))
-    #     writer.add_scalar("average_reward_over_batch", average_ep_reward, batch)
-    #     print("batch: "+ str(batch) + " reward:" +str(average_ep_reward))
-    #     if average_ep_reward > 195:
-    #         break
-
-    #     episode_rewards_n = torch.zeros([batch_size, episode_max_step])
-    #     episode_obs_n = torch.zeros([batch_size, episode_max_step, 4])
-    #     episode_actions_n = torch.zeros([batch_size, episode_max_step])
     writer.close()
 
 if __name__ == "__main__":
