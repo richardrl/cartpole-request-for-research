@@ -31,7 +31,7 @@ def initialize_params():
     return torch.nn.init.xavier_uniform_(torch.zeros((4,2), requires_grad=True))
 
 def sample_bernoulli_distribution(dist):
-    return 1 if torch.rand(1)[0] < dist[1] else 0 
+    return 0 if torch.rand(1)[0] < dist[0] else 1
 
 def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     """
@@ -58,9 +58,9 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     # Use one-hot-encoded sampled_actions to zero out the non-sampled action
     # import ipdb; ipdb.set_trace()
     sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1) 
-    gammas = torch.from_numpy(np.asarray([gamma**i for i in range(states.size(0))])).float()
+    # gammas = torch.from_numpy(np.asarray([gamma**i for i in range(states.size(0))])).float()
     # import ipdb; ipdb.set_trace()
-    return -torch.mean(gammas * advantages * sample_policy) # Positive * positive * negative
+    return -torch.mean(advantages * sample_policy) # Positive * positive * negative
 
 def list2tensor(lst):
     return torch.from_numpy(np.asarray(lst)).float()
@@ -77,8 +77,8 @@ def collect_trajectory(env, theta):
         # Dist = [action0_prob, action1_prob]
         dist = policy(theta, obs)
         sampled_action = sample_bernoulli_distribution(dist)
-        obs, reward, done, info = env.step(sampled_action)
         states.append(obs)
+        obs, reward, done, info = env.step(sampled_action)
         one_hot_sampled_action = np.zeros([2])
         one_hot_sampled_action[sampled_action] = 1
         sampled_actions.append(one_hot_sampled_action)
@@ -86,10 +86,25 @@ def collect_trajectory(env, theta):
 
     rewards = np.asarray(rewards)
 
-    advantages = np.cumsum(rewards[::-1])[::-1].copy()
+    gamma = .97
+    # gammas = np.asarray([gamma**i for i in range(rewards.__len__())])
+    # discounted_rewards = gammas * rewards
+
+    # advantages = np.cumsum(discounted_rewards[::-1])[::-1].copy()
+
+    # Build advantages from last reward, 2nd to last reward, etc...
+
+    ep_len= states.__len__()
+    for start_time in range(ep_len):
+        advantage = 0
+        gamma_t = 1
+        for timestep in range(start_time, ep_len-start_time):
+            advantage += rewards[timestep]*gamma_t
+            gamma_t = gamma*gamma_t
+        advantages.append(advantage)
 
     total_return = np.sum(rewards)
-    return list2tensor(states), list2tensor(sampled_actions), torch.from_numpy(advantages).float(), total_return
+    return list2tensor(states), list2tensor(sampled_actions), list2tensor(advantages), total_return
 
 def main():
     writer = SummaryWriter()
@@ -104,8 +119,7 @@ def main():
     batch_size = 1
     theta = initialize_params()
 
-    opt=torch.optim.Adam([theta])
-
+    opt=torch.optim.Adam([theta], lr=.01)
     for episode in range(max_batches):
         states, sampled_actions, advantages, total_return = collect_trajectory(env, theta)
         loss = episode_loss(theta, states, sampled_actions, advantages)
@@ -122,4 +136,8 @@ def main():
     writer.close()
 
 if __name__ == "__main__":
-    main()
+    # Set seed
+    torch.manual_seed(1)
+    import sys
+    for run in range(int(sys.argv[1])):
+        main()

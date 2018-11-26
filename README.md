@@ -3,7 +3,13 @@ python <script.py>
 
 # Random guessing
 # Hill climbing
-# REINFORCE (vanilla policy gradient) algorithm ala page 270 of Sutton et. al 2018 "Reinforcement Learning" implemented in PyTorch
+# REINFORCE (vanilla policy gradient) algorithm 
+- Ala page 270 of Sutton et. al 2018 "Reinforcement Learning" implemented in PyTorch
+
+# Notes
+- Make sure obs/state is recorded BEFORE env.step() to produce correct (s,a,r) tuple for trajectories
+- Without fixed seed: compared to Tensorflow version, PyTorch version has much higher variance wrt episodes till convergence
+- With fixed seed: PyTorch version has lower variance and usually converges 1/4 of episodes
 
 # References
 - OpenAI Requests for Research Cartpole: https://openai.com/requests-for-research/#cartpole
