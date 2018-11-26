@@ -5,9 +5,11 @@
 import gym
 import torch
 import torch.nn.functional as F
+
 import torch.optim
 from tensorboardX import SummaryWriter
 import numpy as np
+import torch.nn as nn
 
 def policy(theta, s):
     """
@@ -23,8 +25,26 @@ def policy(theta, s):
     """
     return F.softmax(torch.matmul(torch.from_numpy(s).float(), theta))
 
-def value(w, s):
-    pass
+class ValueNet(nn.Module):
+    def __init__(self):
+        super(ValueNet, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(4, 10, bias=True),
+            nn.ReLU(True),
+            nn.Linear(10, 1, bias=True)
+            )
+
+    def forward(self, s):
+        """
+        Input
+        State: (4, ) state vector
+
+        Output
+        Expected return: predicted return from state s
+        """
+        if type(s) != torch.Tensor:
+            s = torch.from_numpy(s).float()
+        return self.model(s)
 
 def initialize_params():
     import torch.nn.init
@@ -63,14 +83,16 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     return -torch.mean(advantages * sample_policy) # Positive * positive * negative
 
 def list2tensor(lst):
-    return torch.from_numpy(np.asarray(lst)).float()
+    tmp = torch.from_numpy(np.asarray(lst)).float()
+    return tmp.unsqueeze(len(tmp.size()))
 
-def collect_trajectory(env, theta):
+def collect_trajectory(env, theta, value_network):
     obs =env.reset()
     done=False
     states = []
     sampled_actions = []
     rewards = []
+    rewards_to_go_arr = []
     advantages = []
     while not done:
         # Sampled_action: scalar action 
@@ -96,15 +118,18 @@ def collect_trajectory(env, theta):
 
     ep_len= states.__len__()
     for start_time in range(ep_len):
-        advantage = 0
+        rewards_to_go = 0
         gamma_t = 1
         for timestep in range(start_time, ep_len-start_time):
-            advantage += rewards[timestep]*gamma_t
+            rewards_to_go += rewards[timestep]*gamma_t
             gamma_t = gamma*gamma_t
+        rewards_to_go_arr.append(rewards_to_go)
+        baseline = value_network(states[start_time])
+        advantage = rewards_to_go - baseline.detach().numpy()
         advantages.append(advantage)
 
     total_return = np.sum(rewards)
-    return list2tensor(states), list2tensor(sampled_actions), list2tensor(advantages), total_return
+    return list2tensor(states), list2tensor(sampled_actions), list2tensor(rewards_to_go_arr), list2tensor(advantages), total_return
 
 def main():
     writer = SummaryWriter()
@@ -119,25 +144,43 @@ def main():
     batch_size = 1
     theta = initialize_params()
 
-    opt=torch.optim.Adam([theta], lr=.01)
+    popt=torch.optim.Adam([theta], lr=.01)
+
+    vn = ValueNet()
+    vopt = torch.optim.Adam(vn.parameters(), lr=.1)
+
     for episode in range(max_batches):
-        states, sampled_actions, advantages, total_return = collect_trajectory(env, theta)
-        loss = episode_loss(theta, states, sampled_actions, advantages)
-        writer.add_scalar("episode loss ", loss, episode)
+        states, sampled_actions, rewards_to_go_arr, advantages, total_return = collect_trajectory(env, theta, vn)
+        ploss = episode_loss(theta, states, sampled_actions, advantages)
+        writer.add_scalar("policy loss ", ploss, episode)
         writer.add_scalar("episode return ", total_return, episode)
+
+        popt.zero_grad()
+        ploss.backward()
+        popt.step()
+
+        writer.add_scalar("policy gradient norm", torch.norm(theta.grad, 2), episode)
         print("episode return: " + str(total_return))
         if total_return > 195:
             print("Total return > 195: completed in " + str(episode) + " episodes")
             break
-        opt.zero_grad()
-        loss.backward()
-        writer.add_scalar("gradient norm", torch.norm(theta.grad, 2), episode)
-        opt.step()
+
+        vopt.zero_grad()
+        # import ipdb; ipdb.set_trace()
+        vloss = F.mse_loss(vn(states), rewards_to_go_arr)
+        vloss.backward()
+        vloss.step()
+
+        writer.add_scalar("value gradient norm", torch.norm(vn.parameters().grad, 2), episode)
+
     writer.close()
 
 if __name__ == "__main__":
     # Set seed
     torch.manual_seed(1)
     import sys
-    for run in range(int(sys.argv[1])):
+    if len(sys.argv) == 1:
         main()
+    else:
+        for run in range(int(sys.argv[1])):
+            main()
