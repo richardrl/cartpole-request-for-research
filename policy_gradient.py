@@ -37,13 +37,15 @@ class ValueNet(nn.Module):
     def forward(self, s):
         """
         Input
-        State: (4, ) state vector
+        State: (?, 4) state vector
 
         Output
-        Expected return: predicted return from state s
+        Expected return: (?) predicted return from state s
         """
         if type(s) != torch.Tensor:
             s = torch.from_numpy(s).float()
+        if len(s.size())>1.0:
+            return self.model(s).squeeze(1)
         return self.model(s)
 
 def initialize_params():
@@ -86,8 +88,8 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
 
 def list2tensor(lst):
     tmp = torch.from_numpy(np.asarray(lst)).float()
-    if tmp.size().__len__() == 1:
-        return tmp.unsqueeze(1)
+    # if tmp.size().__len__() == 1:
+    #     return tmp.unsqueeze(1)
     return tmp
 
 def collect_trajectory(env, theta, value_network):
@@ -171,11 +173,11 @@ def main():
             print("Total return > 195: completed in " + str(episode) + " episodes")
             break
 
-        vopt.zero_grad()
-        # import ipdb; ipdb.set_trace()
-        vloss = F.mse_loss(vn(states), rewards_to_go_arr)
-        vloss.backward()
-        vopt.step()
+        # vopt.zero_grad()
+        # # import ipdb; ipdb.set_trace()
+        # vloss = F.mse_loss(vn(states), rewards_to_go_arr)
+        # vloss.backward()
+        # vopt.step()
 
     writer.close()
 
