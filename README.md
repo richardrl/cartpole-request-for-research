@@ -1,5 +1,7 @@
 # Usage
-python <script.py>
+python <script.py> <flags> (see file)
+
+Records Tensorboard output logs to "runs" subdirectory. 
 
 # Random guessing
 # Hill climbing

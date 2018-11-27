@@ -1,6 +1,7 @@
 # REINFORCE algo implementation
 
 # Pg. 270 of Andrew Sutton's Reinforcement Learning 2018 draft
+import os
 
 import gym
 import torch
@@ -10,6 +11,24 @@ import torch.optim
 from tensorboardX import SummaryWriter
 import numpy as np
 import torch.nn as nn
+
+import argparse
+
+from datetime import datetime
+
+parser= argparse.ArgumentParser()
+parser.add_argument('--exp_prefix', required=True, help="Prefix for experiment. Log files saved ./runs/<exp_prefix>...")
+parser.add_argument('--lr_p', required=False, type=float, default=.01, help="Learning rate for policy optimizer. Default .01")
+parser.add_argument('--lr_v', required=False, type=float, default=.1, help="Learning rate for value optimizer. Default .1")
+parser.add_argument('--manual_seed', required=False, type=int, default=None, help="Manual random seed. Default None")
+parser.add_argument('--num_runs', required=False, type=int, default=1, help="# runs. Default 1")
+
+opt = parser.parse_args()
+print(opt)
+
+if opt.manual_seed:
+    torch.manual_seed(opt.manual_seed)
+
 
 def policy(theta, s):
     """
@@ -44,7 +63,7 @@ class ValueNet(nn.Module):
         """
         if type(s) != torch.Tensor:
             s = torch.from_numpy(s).float()
-        if len(s.size())>1.0:
+        if len(s.size())==2: # shape (?,1) -> (?,)
             return self.model(s).squeeze(1)
         return self.model(s)
 
@@ -138,8 +157,14 @@ def collect_trajectory(env, theta, value_network):
     total_return = np.sum(rewards)
     return list2tensor(states), list2tensor(sampled_actions), list2tensor(rewards_to_go_arr), list2tensor(advantages), total_return
 
-def main():
-    writer = SummaryWriter()
+def main(exp_prefix, lr_p, lr_v, run_num):
+    current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+    try:
+        os.makedirs(F"./runs/{exp_prefix}")
+    except OSError:
+        pass
+    logdir = F"./runs/{exp_prefix}/lr_p{lr_p}-lr_v{lr_v}-run_num{run_num}-{current_time}"
+    writer = SummaryWriter(logdir)
 
     env = gym.make("CartPole-v0")
 
@@ -151,10 +176,10 @@ def main():
     batch_size = 1
     theta = initialize_params()
 
-    popt=torch.optim.Adam([theta], lr=.01)
+    popt=torch.optim.Adam([theta], lr=lr_p)
 
     vn = ValueNet()
-    vopt = torch.optim.Adam(vn.parameters(), lr=.1)
+    vopt = torch.optim.Adam(vn.parameters(), lr=lr_v)
 
     for episode in range(max_batches):
         states, sampled_actions, rewards_to_go_arr, advantages, total_return = collect_trajectory(env, theta, vn)
@@ -173,11 +198,11 @@ def main():
             print("Total return > 195: completed in " + str(episode) + " episodes")
             break
 
-        # vopt.zero_grad()
-        # # import ipdb; ipdb.set_trace()
-        # vloss = F.mse_loss(vn(states), rewards_to_go_arr)
-        # vloss.backward()
-        # vopt.step()
+        vopt.zero_grad()
+        # import ipdb; ipdb.set_trace()
+        vloss = F.mse_loss(vn(states), rewards_to_go_arr)
+        vloss.backward()
+        vopt.step()
 
     writer.close()
 
@@ -185,8 +210,8 @@ if __name__ == "__main__":
     # Set seed
     # torch.manual_seed(1)
     import sys
-    if len(sys.argv) == 1:
-        main()
+    if opt.num_runs == 1:
+        main(opt.exp_prefix, opt.lr_p, opt.lr_v, 1)
     else:
-        for run in range(int(sys.argv[1])):
-            main()
+        for run_num in range(opt.num_runs):
+            main(opt.exp_prefix, opt.lr_p, opt.lr_v, run_num)
