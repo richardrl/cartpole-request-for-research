@@ -67,7 +67,8 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     advantages: (?, 1)
     --- Reward-to-go - baseline
 
-    sample_policy: pi(A_t|s_t;params). Policy evaluated at sampled action A_t
+    sample_policy: (?, 1)
+    --- pi(A_t|s_t;params). Policy evaluated at sampled action A_t
     
 
     Return
@@ -80,11 +81,14 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1) 
     # gammas = torch.from_numpy(np.asarray([gamma**i for i in range(states.size(0))])).float()
     # import ipdb; ipdb.set_trace()
-    return -torch.mean(advantages * sample_policy) # Positive * positive * negative
+    preloss = torch.mean(advantages * sample_policy)
+    return -preloss, preloss # Positive * positive * negative
 
 def list2tensor(lst):
     tmp = torch.from_numpy(np.asarray(lst)).float()
-    return tmp.unsqueeze(len(tmp.size()))
+    if tmp.size().__len__() == 1:
+        return tmp.unsqueeze(1)
+    return tmp
 
 def collect_trajectory(env, theta, value_network):
     obs =env.reset()
@@ -125,7 +129,8 @@ def collect_trajectory(env, theta, value_network):
             gamma_t = gamma*gamma_t
         rewards_to_go_arr.append(rewards_to_go)
         baseline = value_network(states[start_time])
-        advantage = rewards_to_go - baseline.detach().numpy()
+        # advantage = rewards_to_go - baseline.detach().numpy()
+        advantage = rewards_to_go
         advantages.append(advantage)
 
     total_return = np.sum(rewards)
@@ -151,7 +156,8 @@ def main():
 
     for episode in range(max_batches):
         states, sampled_actions, rewards_to_go_arr, advantages, total_return = collect_trajectory(env, theta, vn)
-        ploss = episode_loss(theta, states, sampled_actions, advantages)
+        ploss, preloss = episode_loss(theta, states, sampled_actions, advantages)
+        writer.add_scalar("policy preloss ", preloss, episode)
         writer.add_scalar("policy loss ", ploss, episode)
         writer.add_scalar("episode return ", total_return, episode)
 
@@ -169,15 +175,13 @@ def main():
         # import ipdb; ipdb.set_trace()
         vloss = F.mse_loss(vn(states), rewards_to_go_arr)
         vloss.backward()
-        vloss.step()
-
-        writer.add_scalar("value gradient norm", torch.norm(vn.parameters().grad, 2), episode)
+        vopt.step()
 
     writer.close()
 
 if __name__ == "__main__":
     # Set seed
-    torch.manual_seed(1)
+    # torch.manual_seed(1)
     import sys
     if len(sys.argv) == 1:
         main()
