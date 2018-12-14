@@ -11,23 +11,25 @@ import torch.optim
 from tensorboardX import SummaryWriter
 import numpy as np
 import torch.nn as nn
-
+from config import *
 import argparse
 
 from datetime import datetime
 
-parser= argparse.ArgumentParser()
-parser.add_argument('--exp_prefix', required=True, help="Prefix for experiment. Log files saved ./runs/<exp_prefix>...")
-parser.add_argument('--lr_p', required=False, type=float, default=.01, help="Learning rate for policy optimizer. Default .01")
-parser.add_argument('--lr_v', required=False, type=float, default=.1, help="Learning rate for value optimizer. Default .1")
-parser.add_argument('--manual_seed', required=False, type=int, default=None, help="Manual random seed. Default None")
-parser.add_argument('--num_runs', required=False, type=int, default=1, help="# runs. Default 1")
-
-opt = parser.parse_args()
-print(opt)
-
-if opt.manual_seed:
-    torch.manual_seed(opt.manual_seed)
+# parser= argparse.ArgumentParser()
+# parser.add_argument('--exp_prefix', required=True, help="Prefix for experiment. Log files saved ./runs/<exp_prefix>...")
+# parser.add_argument('--lr_p', required=False, type=float, default=.01, help="Learning rate for policy optimizer. Default .01")
+# parser.add_argument('--lr_v', required=False, type=float, default=.1, help="Learning rate for value optimizer. Default .1")
+# parser.add_argument('--manual_seed', required=False, type=int, default=None, help="Manual random seed. Default None")
+# parser.add_argument('--num_runs', required=False, type=int, default=1, help="# runs. Default 1")
+# parser.add_argument('--out_dir', required=False, type=str, help="Outdir for video files")
+#
+# opt = parser.parse_args()
+# print(opt)
+#
+#
+# if opt.manual_seed:
+#     torch.manual_seed(opt.manual_seed)
 
 
 def policy(theta, s):
@@ -80,29 +82,30 @@ def episode_loss(theta, states, sampled_actions, advantages, gamma=.97):
     theta: (4, 2)
     --- Weights for policy network
 
-    states: (?, 4)
+    states: (T, 4)
 
-    sampled_actions: (?, 2)
+    sampled_actions: (T, 2)
     --- These are the actions actually taken during the trajectory rollouts
 
-    advantages: (?, 1)
+    advantages: (T, 1)
     --- Reward-to-go - baseline
 
-    sample_policy: (?, 1)
+    sample_policy: (T, 1)
     --- pi(A_t|s_t;params). Policy evaluated at sampled action A_t
     
 
     Return
     loss: -(expected return)
     """
-    action_logits = torch.matmul(states, theta)
+    # assert len(states.size()) == 3
+    action_logits = torch.matmul(states, theta) #(N, T, 2)
 
     # Use one-hot-encoded sampled_actions to zero out the non-sampled action
     # import ipdb; ipdb.set_trace()
-    sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1) 
+    sample_policy = torch.sum(F.log_softmax(action_logits, dim=1)*sampled_actions, dim=1) #(N, T, 1) = reduce(N,T,2) * (N,T,2)
     # gammas = torch.from_numpy(np.asarray([gamma**i for i in range(states.size(0))])).float()
     # import ipdb; ipdb.set_trace()
-    preloss = torch.mean(advantages * sample_policy)
+    preloss = torch.mean(advantages * sample_policy) # = reduce(reduce[(N, T, 1) * (N, T, 1), dim=1], dim=0)
     return -preloss, preloss # Positive * positive * negative
 
 def list2tensor(lst):
@@ -166,12 +169,13 @@ def main(exp_prefix, lr_p, lr_v, run_num):
     logdir = F"./runs/{exp_prefix}/lr_p{lr_p}-lr_v{lr_v}-run_num{run_num}-{current_time}"
     writer = SummaryWriter(logdir)
 
-    env = gym.make("CartPole-v0")
+    env = gym.make("CartPole-v1")
+    env = gym.wrappers.Monitor(env, main_config['OutDir'], force=True)
 
     max_batches = 10000
 
     gamma = .97
-    episode_max_step = 200
+    episode_max_step = 500
 
     batch_size = 1
     theta = initialize_params()
@@ -194,7 +198,7 @@ def main(exp_prefix, lr_p, lr_v, run_num):
 
         writer.add_scalar("policy gradient norm", torch.norm(theta.grad, 2), episode)
         print("episode return: " + str(total_return))
-        if total_return > 195:
+        if total_return > 495:
             print("Total return > 195: completed in " + str(episode) + " episodes")
             break
 
@@ -210,8 +214,8 @@ if __name__ == "__main__":
     # Set seed
     # torch.manual_seed(1)
     import sys
-    if opt.num_runs == 1:
-        main(opt.exp_prefix, opt.lr_p, opt.lr_v, 1)
+    if main_config.getint('NumRuns') == 1:
+        main(main_config['ExpPrefix'], main_config.getfloat('LrP'), main_config.getfloat('LrV'), 1)
     else:
-        for run_num in range(opt.num_runs):
-            main(opt.exp_prefix, opt.lr_p, opt.lr_v, run_num)
+        for run_num in range(main_config.getint('NumRuns')):
+            main(main_config['ExpPrefix'], main_config.getfloat('LrP'), main_config.getfloat('LrV'), run_num)
