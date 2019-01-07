@@ -3,10 +3,9 @@ python <script.py> <flags> (see file)
 
 Records Tensorboard output logs to "runs" subdirectory. 
 
-# Random guessing
-# Hill climbing
-# REINFORCE (vanilla policy gradient) algorithm 
-- Ala page 270 of Sutton et. al 2018 "Reinforcement Learning" implemented in PyTorch
+1. Random guessing
+2. Hill climbing
+3. REINFORCE (vanilla policy gradient) algorithm 
 
 # Notes
 - Make sure obs/state is recorded BEFORE env.step() to produce correct (s,a,r) tuple for trajectories
